@@ -13,9 +13,9 @@ import authApis from "./apis/auth.js";
 
 // Fix Node.js Windows SRV lookup issue with MongoDB Atlas
 try {
-  dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
+    dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
 } catch (e) {
-  console.warn("Could not set custom DNS servers:", e.message);
+    console.warn("Could not set custom DNS servers:", e.message);
 }
 
 const app = express();
@@ -23,19 +23,19 @@ const PORT = process.env.PORT || 5000;
 const SECRET = process.env.JWT_SECRET || "default_jwt_secret_chat_app";
 
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "http://127.0.0.1:3000",
-  "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
 ];
 
 app.use(
-  cors({
-    origin: (origin, callback) => {
-      callback(null, true);
-    },
-    credentials: true,
-  })
+    cors({
+        origin: (origin, callback) => {
+            callback(null, true);
+        },
+        credentials: true,
+    })
 );
 
 app.use(express.json());
@@ -44,12 +44,12 @@ app.use(cookieParser());
 // Connect MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
 if (MONGODB_URI) {
-  mongoose
-    .connect(MONGODB_URI)
-    .then(() => console.log("Mongoose is connected successfully"))
-    .catch((err) => console.error("Mongoose connection error:", err.message));
+    mongoose
+        .connect(MONGODB_URI)
+        .then(() => console.log("Mongoose is connected successfully"))
+        .catch((err) => console.error("Mongoose connection error:", err.message));
 } else {
-  console.warn("MONGODB_URI is not defined in .env");
+    console.warn("MONGODB_URI is not defined in .env");
 }
 
 // Public Auth APIs (login, signup, logout)
@@ -57,230 +57,228 @@ app.use("/api/v1", authApis);
 
 // Authentication & Authorization Middleware for protected API endpoints
 app.use("/api/v1", (req, res, next) => {
-  const token = req.cookies?.Token || req.headers?.authorization?.replace("Bearer ", "");
-  if (!token) {
-    return res.status(401).send({ status: "error", message: "Unauthorized: No token provided" });
-  }
-
-  jwt.verify(token, SECRET, (err, decodedData) => {
-    if (err) {
-      return res.status(401).send({ status: "error", message: "Unauthorized: Invalid or expired token" });
+    const token = req.cookies?.Token || req.headers?.authorization?.replace("Bearer ", "");
+    if (!token) {
+        return res.status(401).send({ status: "error", message: "Unauthorized: No token provided" });
     }
-    const userData = { ...decodedData };
-    delete userData.iat;
-    delete userData.exp;
-    req.user = userData;
-    next();
-  });
+
+    jwt.verify(token, SECRET, (err, decodedData) => {
+        if (err) {
+            return res.status(401).send({ status: "error", message: "Unauthorized: Invalid or expired token" });
+        }
+        const userData = { ...decodedData };
+        delete userData.iat;
+        delete userData.exp;
+        req.user = userData;
+        next();
+    });
 });
 
 // Protected routes
 app.get("/api/v1/me", (req, res) => {
-  res.send({ status: "success", user: req.user });
+    res.send({ status: "success", user: req.user });
 });
 
 // Get all users except current logged-in user
 app.get("/api/v1/users", async (req, res) => {
-  try {
-    const currentUserId = req.user._id;
-    const users = await userModel.find({ _id: { $ne: currentUserId } }, "firstName lastName email createdOn");
-    res.send({ status: "success", users });
-  } catch (error) {
-    console.error("Fetch users error:", error);
-    res.status(500).send({ status: "error", message: "Internal Server Error" });
-  }
+    try {
+        const currentUserId = req.user._id;
+        const users = await userModel.find({ _id: { $ne: currentUserId } }, "firstName lastName email createdOn");
+        res.send({ status: "success", users });
+    } catch (error) {
+        console.error("Fetch users error:", error);
+        res.status(500).send({ status: "error", message: "Internal Server Error" });
+    }
 });
 
 app.get("/api/v1/user-detail/:id", async (req, res) => {
-  try {
-    const user = await userModel.findById(req.params.id, "firstName lastName email createdOn");
-    if (!user) {
-      return res.status(404).send({ status: "error", message: "User not found" });
+    try {
+        const user = await userModel.findById(req.params.id, "firstName lastName email createdOn");
+        if (!user) {
+            return res.status(404).send({ status: "error", message: "User not found" });
+        }
+        res.send({ status: "success", user });
+    } catch (error) {
+        console.error("Fetch user detail error:", error);
+        res.status(500).send({ status: "error", message: "Internal Server Error" });
     }
-    res.send({ status: "success", user });
-  } catch (error) {
-    console.error("Fetch user detail error:", error);
-    res.status(500).send({ status: "error", message: "Internal Server Error" });
-  }
 });
 
 // Send message via REST API
 app.post("/api/v1/chat/:id", async (req, res) => {
-  const receiverId = req.params.id;
-  const senderId = req.user._id;
+    const receiverId = req.params.id;
+    const senderId = req.user._id;
 
-  if (!req.body?.message || !req.body.message.trim()) {
-    return res.status(400).send({ status: "error", message: "Message field is required" });
-  }
+    if (!req.body?.message || !req.body.message.trim()) {
+        return res.status(400).send({ status: "error", message: "Message field is required" });
+    }
 
-  try {
-    const newMsg = await messageModel.create({
-      from: senderId,
-      to: receiverId,
-      message: req.body.message.trim(),
-    });
+    try {
+        const newMsg = await messageModel.create({
+            from: senderId,
+            to: receiverId,
+            message: req.body.message.trim(),
+        });
 
-    const conversation = await messageModel
-      .findById(newMsg._id)
-      .populate({ path: "from", select: "firstName lastName email" })
-      .populate({ path: "to", select: "firstName lastName email" })
-      .exec();
+        const conversation = await messageModel
+            .findById(newMsg._id)
+            .populate({ path: "from", select: "firstName lastName email" })
+            .populate({ path: "to", select: "firstName lastName email" })
+            .exec();
 
-    // Realtime notification via Socket.IO
-    io.to(`user_${receiverId}`).emit("new_message", conversation);
-    io.to(`user_${senderId}`).emit("new_message", conversation);
+        // Realtime notification via Socket.IO
+        io.to(`user_${receiverId}`).emit("new_message", conversation);
+        io.to(`user_${senderId}`).emit("new_message", conversation);
 
-    const roomId = [senderId, receiverId].sort().join("_");
-    io.to(`room_${roomId}`).emit("message", conversation);
+        const roomId = [senderId, receiverId].sort().join("_");
+        io.to(`room_${roomId}`).emit("message", conversation);
 
-    res.send({ status: "success", message: "Message Sent", chat: conversation });
-  } catch (error) {
-    console.error("Send message error:", error);
-    res.status(500).send({ status: "error", message: "Internal Server Error" });
-  }
+        res.send({ status: "success", message: "Message Sent", chat: conversation });
+    } catch (error) {
+        console.error("Send message error:", error);
+        res.status(500).send({ status: "error", message: "Internal Server Error" });
+    }
 });
 
 // Get conversation messages between two users
 app.get("/api/v1/conversation/:id", async (req, res) => {
-  const receiverId = req.params.id;
-  const senderId = req.user._id;
+    const receiverId = req.params.id;
+    const senderId = req.user._id;
 
-  try {
-    const conversations = await messageModel
-      .find({
-        $or: [
-          { from: receiverId, to: senderId },
-          { from: senderId, to: receiverId },
-        ],
-      })
-      .populate({ path: "from", select: "firstName lastName email" })
-      .populate({ path: "to", select: "firstName lastName email" })
-      .sort({ createdOn: 1 })
-      .exec();
+    try {
+        const conversations = await messageModel
+            .find({
+                $or: [
+                    { from: receiverId, to: senderId },
+                    { from: senderId, to: receiverId },
+                ],
+            })
+            .populate({ path: "from", select: "firstName lastName email" })
+            .populate({ path: "to", select: "firstName lastName email" })
+            .sort({ createdOn: 1 })
+            .exec();
 
-    res.send({ status: "success", message: "Messages Found", conversations });
-  } catch (error) {
-    console.error("Get conversation error:", error);
-    res.status(500).send({ status: "error", message: "Internal Server Error" });
-  }
+        res.send({ status: "success", message: "Messages Found", conversations });
+    } catch (error) {
+        console.error("Get conversation error:", error);
+        res.status(500).send({ status: "error", message: "Internal Server Error" });
+    }
 });
 
 const server = createServer(app);
 
 const io = new socketIo(server, {
-  cors: {
-    origin: (origin, callback) => callback(null, true),
-    credentials: true,
-  },
+    cors: {
+        origin: (origin, callback) => callback(null, true),
+        credentials: true,
+    },
 });
 
 // Socket.io online users tracking
 const onlineUsers = new Map();
 
 io.use((socket, next) => {
-  const token =
-    socket.handshake.auth?.token ||
-    (socket.handshake.headers.cookie &&
-      socket.handshake.headers.cookie
-        .split(";")
-        .find((c) => c.trim().startsWith("Token="))
-        ?.split("=")[1]);
+    const token =
+        socket.handshake.auth?.token ||
+        (socket.handshake.headers.cookie &&
+            socket.handshake.headers.cookie
+                .split(";")
+                .find((c) => c.trim().startsWith("Token="))
+                ?.split("=")[1]);
 
-  if (!token) {
-    return next();
-  }
-
-  jwt.verify(token, SECRET, (err, decoded) => {
-    if (!err && decoded) {
-      socket.user = decoded;
+    if (!token) {
+        return next();
     }
-    next();
-  });
+
+    jwt.verify(token, SECRET, (err, decoded) => {
+        if (!err && decoded) {
+            socket.user = decoded;
+        }
+        next();
+    });
 });
 
 io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
+    console.log("Client connected:", socket.id);
 
-  if (socket.user?._id) {
-    const userId = socket.user._id.toString();
-    onlineUsers.set(userId, socket.id);
-    socket.join(`user_${userId}`);
-    io.emit("user_status", { userId, status: "online", onlineUsers: Array.from(onlineUsers.keys()) });
-  }
-
-  socket.on("join_user", (userId) => {
-    if (!userId) return;
-    onlineUsers.set(userId.toString(), socket.id);
-    socket.join(`user_${userId}`);
-    io.emit("user_status", { userId, status: "online", onlineUsers: Array.from(onlineUsers.keys()) });
-  });
-
-  socket.on("join_chat", ({ senderId, receiverId }) => {
-    if (!senderId || !receiverId) return;
-    const roomId = [senderId, receiverId].sort().join("_");
-    socket.join(`room_${roomId}`);
-  });
-
-  socket.on("typing", ({ senderId, receiverId, isTyping }) => {
-    if (!receiverId) return;
-    io.to(`user_${receiverId}`).emit("typing_status", { senderId, isTyping });
-  });
-
-  socket.on("send_message", async ({ senderId, receiverId, message }, callback) => {
-    try {
-      if (!senderId || !receiverId || !message?.trim()) return;
-
-      const newMsg = await messageModel.create({
-        from: senderId,
-        to: receiverId,
-        message: message.trim(),
-      });
-
-      const conversation = await messageModel
-        .findById(newMsg._id)
-        .populate({ path: "from", select: "firstName lastName email" })
-        .populate({ path: "to", select: "firstName lastName email" })
-        .exec();
-
-      io.to(`user_${receiverId}`).emit("new_message", conversation);
-      io.to(`user_${senderId}`).emit("new_message", conversation);
-
-      const roomId = [senderId, receiverId].sort().join("_");
-      io.to(`room_${roomId}`).emit("message", conversation);
-
-      if (typeof callback === "function") {
-        callback({ status: "success", data: conversation });
-      }
-    } catch (err) {
-      console.error("Socket send_message error:", err);
-      if (typeof callback === "function") {
-        callback({ status: "error", message: err.message });
-      }
+    if (socket.user?._id) {
+        const userId = socket.user._id.toString();
+        onlineUsers.set(userId, socket.id);
+        socket.join(`user_${userId}`);
+        io.emit("user_status", { userId, status: "online", onlineUsers: Array.from(onlineUsers.keys()) });
     }
-  });
 
-  socket.on("disconnect", () => {
-    for (const [uid, sid] of onlineUsers.entries()) {
-      if (sid === socket.id) {
-        onlineUsers.delete(uid);
-        io.emit("user_status", { userId: uid, status: "offline", onlineUsers: Array.from(onlineUsers.keys()) });
-        break;
-      }
-    }
-    console.log("Client disconnected:", socket.id);
-  });
+    socket.on("join_user", (userId) => {
+        if (!userId) return;
+        onlineUsers.set(userId.toString(), socket.id);
+        socket.join(`user_${userId}`);
+        io.emit("user_status", { userId, status: "online", onlineUsers: Array.from(onlineUsers.keys()) });
+    });
+
+    socket.on("join_chat", ({ senderId, receiverId }) => {
+        if (!senderId || !receiverId) return;
+        const roomId = [senderId, receiverId].sort().join("_");
+        socket.join(`room_${roomId}`);
+    });
+
+    socket.on("typing", ({ senderId, receiverId, isTyping }) => {
+        if (!receiverId) return;
+        io.to(`user_${receiverId}`).emit("typing_status", { senderId, isTyping });
+    });
+
+    socket.on("send_message", async ({ senderId, receiverId, message }, callback) => {
+        try {
+            if (!senderId || !receiverId || !message?.trim()) return;
+
+            const newMsg = await messageModel.create({
+                from: senderId,
+                to: receiverId,
+                message: message.trim(),
+            });
+
+            const conversation = await messageModel
+                .findById(newMsg._id)
+                .populate({ path: "from", select: "firstName lastName email" })
+                .populate({ path: "to", select: "firstName lastName email" })
+                .exec();
+
+            io.to(`user_${receiverId}`).emit("new_message", conversation);
+            io.to(`user_${senderId}`).emit("new_message", conversation);
+
+            const roomId = [senderId, receiverId].sort().join("_");
+            io.to(`room_${roomId}`).emit("message", conversation);
+
+            if (typeof callback === "function") {
+                callback({ status: "success", data: conversation });
+            }
+        } catch (err) {
+            console.error("Socket send_message error:", err);
+            if (typeof callback === "function") {
+                callback({ status: "error", message: err.message });
+            }
+        }
+    });
+
+    socket.on("disconnect", () => {
+        for (const [uid, sid] of onlineUsers.entries()) {
+            if (sid === socket.id) {
+                onlineUsers.delete(uid);
+                io.emit("user_status", { userId: uid, status: "offline", onlineUsers: Array.from(onlineUsers.keys()) });
+                break;
+            }
+        }
+        console.log("Client disconnected:", socket.id);
+    });
 });
 
 const __dirname = path.resolve();
 const __frontend = path.join(__dirname, "./web/dist");
 app.use(express.static(__frontend));
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api")) return next();
-  res.sendFile(path.join(__frontend, "index.html"), (err) => {
-    if (err) next();
-  });
+    if (req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(__frontend, "index.html"), (err) => {
+        if (err) next();
+    });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+server.listen(PORT, "0.0.0.0");
