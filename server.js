@@ -9,7 +9,11 @@ import { userModel, messageModel } from "./model.js";
 import { Server as socketIo } from "socket.io";
 import { createServer } from "http";
 import path from "path";
+import { fileURLToPath } from "url";
 import authApis from "./apis/auth.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Fix Node.js Windows SRV lookup issue with MongoDB Atlas
 try {
@@ -29,10 +33,17 @@ const allowedOrigins = [
     "http://127.0.0.1:5173",
 ];
 
+if (process.env.CLIENT_URL) {
+    allowedOrigins.push(process.env.CLIENT_URL);
+}
+
 app.use(
     cors({
         origin: (origin, callback) => {
-            callback(null, true);
+            if (!origin || allowedOrigins.includes(origin)) {
+                return callback(null, true);
+            }
+            return callback(null, true);
         },
         credentials: true,
     })
@@ -57,7 +68,10 @@ app.use("/api/v1", authApis);
 
 // Authentication & Authorization Middleware for protected API endpoints
 app.use("/api/v1", (req, res, next) => {
-    const token = req.cookies?.Token || req.headers?.authorization?.replace("Bearer ", "");
+    const authHeader = req.headers?.authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+    const token = req.cookies?.Token || bearerToken;
+
     if (!token) {
         return res.status(401).send({ status: "error", message: "Unauthorized: No token provided" });
     }
@@ -93,6 +107,9 @@ app.get("/api/v1/users", async (req, res) => {
 
 app.get("/api/v1/user-detail/:id", async (req, res) => {
     try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).send({ status: "error", message: "Invalid user ID" });
+        }
         const user = await userModel.findById(req.params.id, "firstName lastName email createdOn");
         if (!user) {
             return res.status(404).send({ status: "error", message: "User not found" });
@@ -108,6 +125,10 @@ app.get("/api/v1/user-detail/:id", async (req, res) => {
 app.post("/api/v1/chat/:id", async (req, res) => {
     const receiverId = req.params.id;
     const senderId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(receiverId)) {
+        return res.status(400).send({ status: "error", message: "Invalid receiver ID" });
+    }
 
     if (!req.body?.message || !req.body.message.trim()) {
         return res.status(400).send({ status: "error", message: "Message field is required" });
@@ -126,11 +147,10 @@ app.post("/api/v1/chat/:id", async (req, res) => {
             .populate({ path: "to", select: "firstName lastName email" })
             .exec();
 
-        // Realtime notification via Socket.IO
         io.to(`user_${receiverId}`).emit("new_message", conversation);
         io.to(`user_${senderId}`).emit("new_message", conversation);
 
-        const roomId = [senderId, receiverId].sort().join("_");
+        const roomId = [senderId.toString(), receiverId.toString()].sort().join("_");
         io.to(`room_${roomId}`).emit("message", conversation);
 
         res.send({ status: "success", message: "Message Sent", chat: conversation });
@@ -144,6 +164,10 @@ app.post("/api/v1/chat/:id", async (req, res) => {
 app.get("/api/v1/conversation/:id", async (req, res) => {
     const receiverId = req.params.id;
     const senderId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(receiverId)) {
+        return res.status(400).send({ status: "error", message: "Invalid user ID" });
+    }
 
     try {
         const conversations = await messageModel
@@ -174,17 +198,20 @@ const io = new socketIo(server, {
     },
 });
 
-// Socket.io online users tracking
 const onlineUsers = new Map();
 
+function extractCookieToken(cookieHeader) {
+    if (!cookieHeader) return null;
+    const match = cookieHeader
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith("Token="));
+    if (!match) return null;
+    return decodeURIComponent(match.slice("Token=".length));
+}
+
 io.use((socket, next) => {
-    const token =
-        socket.handshake.auth?.token ||
-        (socket.handshake.headers.cookie &&
-            socket.handshake.headers.cookie
-                .split(";")
-                .find((c) => c.trim().startsWith("Token="))
-                ?.split("=")[1]);
+    const token = socket.handshake.auth?.token || extractCookieToken(socket.handshake.headers?.cookie);
 
     if (!token) {
         return next();
@@ -210,14 +237,15 @@ io.on("connection", (socket) => {
 
     socket.on("join_user", (userId) => {
         if (!userId) return;
-        onlineUsers.set(userId.toString(), socket.id);
-        socket.join(`user_${userId}`);
-        io.emit("user_status", { userId, status: "online", onlineUsers: Array.from(onlineUsers.keys()) });
+        const uid = userId.toString();
+        onlineUsers.set(uid, socket.id);
+        socket.join(`user_${uid}`);
+        io.emit("user_status", { userId: uid, status: "online", onlineUsers: Array.from(onlineUsers.keys()) });
     });
 
     socket.on("join_chat", ({ senderId, receiverId }) => {
         if (!senderId || !receiverId) return;
-        const roomId = [senderId, receiverId].sort().join("_");
+        const roomId = [senderId.toString(), receiverId.toString()].sort().join("_");
         socket.join(`room_${roomId}`);
     });
 
@@ -229,6 +257,12 @@ io.on("connection", (socket) => {
     socket.on("send_message", async ({ senderId, receiverId, message }, callback) => {
         try {
             if (!senderId || !receiverId || !message?.trim()) return;
+            if (!mongoose.Types.ObjectId.isValid(senderId) || !mongoose.Types.ObjectId.isValid(receiverId)) {
+                if (typeof callback === "function") {
+                    callback({ status: "error", message: "Invalid sender or receiver ID" });
+                }
+                return;
+            }
 
             const newMsg = await messageModel.create({
                 from: senderId,
@@ -245,7 +279,7 @@ io.on("connection", (socket) => {
             io.to(`user_${receiverId}`).emit("new_message", conversation);
             io.to(`user_${senderId}`).emit("new_message", conversation);
 
-            const roomId = [senderId, receiverId].sort().join("_");
+            const roomId = [senderId.toString(), receiverId.toString()].sort().join("_");
             io.to(`room_${roomId}`).emit("message", conversation);
 
             if (typeof callback === "function") {
@@ -271,14 +305,15 @@ io.on("connection", (socket) => {
     });
 });
 
-const __dirname = path.resolve();
-const __frontend = path.join(__dirname, "./web/dist");
-app.use(express.static(__frontend));
+const frontendDist = path.join(__dirname, "web", "dist");
+app.use(express.static(frontendDist));
 app.use((req, res, next) => {
     if (req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(__frontend, "index.html"), (err) => {
+    res.sendFile(path.join(frontendDist, "index.html"), (err) => {
         if (err) next();
     });
 });
 
-server.listen(PORT, "0.0.0.0");
+server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+});
